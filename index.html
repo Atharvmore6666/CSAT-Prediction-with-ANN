@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSAT Score Predictor</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind for Inter font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f9;
+        }
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+            margin-top: -6px; /* Center thumb vertically */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Main Card Container -->
+    <div class="w-full max-w-4xl bg-white rounded-xl shadow-2xl p-6 md:p-10 border border-gray-100">
+
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-indigo-700">CSAT Score Predictor</h1>
+            <p class="text-gray-600 mt-2">Configure customer interaction metrics to predict the satisfaction outcome.</p>
+        </header>
+
+        <form id="predictionForm" class="space-y-6">
+
+            <!-- Feature Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                <!-- 1. Numerical Sliders (Sliders/Slicers for numerical input) -->
+                <div class="col-span-1 md:col-span-2 lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-indigo-50 rounded-lg">
+                    <h2 class="col-span-full text-xl font-semibold text-indigo-800 mb-2">Service Time Metrics</h2>
+
+                    <!-- Handling Time Slider -->
+                    <div class="slider-container">
+                        <label for="handling_time" class="block text-sm font-medium text-gray-700">
+                            Handling Time (Seconds): <span id="handling_time_val" class="font-bold text-indigo-600">900</span>
+                        </label>
+                        <input type="range" id="handling_time" name="handling_time" min="60" max="1800" value="900" step="10"
+                               class="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer range-lg mt-2">
+                    </div>
+
+                    <!-- Response to Survey Time Slider -->
+                    <div class="slider-container">
+                        <label for="response_to_survey_time" class="block text-sm font-medium text-gray-700">
+                            Survey Response Time (Hours): <span id="response_to_survey_time_val" class="font-bold text-indigo-600">12</span>
+                        </label>
+                        <input type="range" id="response_to_survey_time" name="response_to_survey_time" min="0" max="72" value="12" step="0.5"
+                               class="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer range-lg mt-2">
+                    </div>
+                </div>
+
+                <!-- 2. Categorical Dropdowns -->
+                <h2 class="col-span-full text-xl font-semibold text-indigo-800 mt-4 border-t pt-6">Interaction Details</h2>
+
+                <!-- Select Box Template -->
+                <div id="select-inputs-container" class="col-span-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Dropdowns will be generated here by JS -->
+                </div>
+
+            </div>
+
+            <!-- Prediction Button & Result Area -->
+            <div class="pt-6 border-t border-gray-200 flex flex-col items-center space-y-4">
+                <button type="submit" id="predictButton"
+                        class="w-full md:w-1/2 px-6 py-3 text-lg font-semibold text-white bg-indigo-600 rounded-lg shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/50 transition duration-150 ease-in-out disabled:opacity-50">
+                    Predict CSAT Score
+                </button>
+
+                <div id="resultArea" class="w-full md:w-1/2 p-4 text-center rounded-lg shadow-inner bg-gray-50 transition-all duration-300 transform scale-0 opacity-0">
+                    <p class="text-sm font-medium text-gray-500">Predicted CSAT Category:</p>
+                    <p id="predictionText" class="text-3xl font-extrabold mt-1 text-gray-800"></p>
+                </div>
+
+                <div id="errorMessage" class="hidden text-red-600 p-3 bg-red-100 rounded-lg w-full md:w-1/2 text-center"></div>
+            </div>
+
+        </form>
+    </div>
+
+    <script>
+        // Define the categorical choices (must match app.py logic)
+        const CATEGORICAL_CHOICES = {
+            'channel_name': ['Phone', 'Chat', 'Email', 'Social Media'],
+            'category': ['Technical Issue', 'Billing Inquiry', 'Order Status', 'General Feedback'],
+            'subcategory': ['Login Failure', 'Payment Error', 'Shipping Delay', 'Product Complaint'],
+            'agent_name': ['Emily Chen', 'John Smith', 'Olivia Tan', 'Michael Lee'],
+            'supervisor': ['David Johnson', 'Maria Lee', 'Sarah Chen'],
+            'manager': ['Robert Kim', 'Jessica Ng', 'Alex Brown'],
+            'tenurebucket': ['0-1 Yr', '1-3 Yr', '3-5 Yr', '5+ Yr'],
+            'agentshift': ['Morning', 'Afternoon', 'Night'],
+            'handling_time_bucket': ['Low', 'Medium', 'High']
+        };
+
+        const form = document.getElementById('predictionForm');
+        const predictButton = document.getElementById('predictButton');
+        const resultArea = document.getElementById('resultArea');
+        const predictionText = document.getElementById('predictionText');
+        const errorMessage = document.getElementById('errorMessage');
+
+        // Helper to map prediction result to a color/style
+        function styleResult(prediction) {
+            let color = 'text-gray-800';
+            let bg = 'bg-gray-100';
+            const lowerCasePred = prediction.toLowerCase();
+
+            if (lowerCasePred.includes('great')) {
+                color = 'text-emerald-600';
+                bg = 'bg-emerald-50';
+            } else if (lowerCasePred.includes('median')) {
+                color = 'text-yellow-600';
+                bg = 'bg-yellow-50';
+            } else if (lowerCasePred.includes('low')) {
+                color = 'text-red-600';
+                bg = 'bg-red-50';
+            }
+            return { color, bg };
+        }
+
+        // --------------------------------------------------
+        // 1. Initial Setup: Populate Dropdowns & Sliders
+        // --------------------------------------------------
+
+        function createSelectInput(name, choices) {
+            const container = document.createElement('div');
+            container.className = 'flex flex-col space-y-1';
+            const label = document.createElement('label');
+            label.htmlFor = name;
+            // Format label name nicely (e.g., 'channel_name' -> 'Channel Name')
+            label.textContent = name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ':';
+            label.className = 'block text-sm font-medium text-gray-700';
+
+            const select = document.createElement('select');
+            select.id = name;
+            select.name = name;
+            select.className = 'mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out';
+
+            // Add default "Select..." option if not all features are required
+            // select.innerHTML = `<option value="" disabled selected>Select ${label.textContent}</option>`;
+
+            choices.forEach(choice => {
+                const option = document.createElement('option');
+                option.value = choice;
+                option.textContent = choice;
+                select.appendChild(option);
+            });
+
+            container.appendChild(label);
+            container.appendChild(select);
+            return container;
+        }
+
+        function populateInputs() {
+            const selectContainer = document.getElementById('select-inputs-container');
+            // Generate Select dropdowns
+            for (const [name, choices] of Object.entries(CATEGORICAL_CHOICES)) {
+                selectContainer.appendChild(createSelectInput(name, choices));
+            }
+
+            // Add event listeners for sliders to update value display
+            const sliders = [
+                { id: 'handling_time', unit: '' },
+                { id: 'response_to_survey_time', unit: '' }
+            ];
+
+            sliders.forEach(s => {
+                const slider = document.getElementById(s.id);
+                const valueDisplay = document.getElementById(s.id + '_val');
+                if (slider && valueDisplay) {
+                    slider.addEventListener('input', (e) => {
+                        valueDisplay.textContent = e.target.value + s.unit;
+                    });
+                }
+            });
+
+             // Apply initial styles (hidden)
+            resultArea.classList.remove('scale-0', 'opacity-0');
+            resultArea.classList.add('scale-95', 'opacity-75'); // Prepare for first prediction display
+        }
+
+        window.onload = populateInputs;
+
+        // --------------------------------------------------
+        // 2. Prediction Handler
+        // --------------------------------------------------
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMessage.classList.add('hidden');
+            resultArea.classList.remove('scale-100', 'opacity-100');
+            resultArea.classList.add('scale-95', 'opacity-75');
+            predictionText.textContent = 'Predicting...';
+            predictButton.disabled = true;
+            predictButton.textContent = 'Analyzing Data...';
+
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            try {
+                // Ensure numerical data is correctly parsed (though FormData returns strings,
+                // the inputs have type=range, making the conversion trivial)
+                data.handling_time = parseFloat(data.handling_time);
+                data.response_to_survey_time = parseFloat(data.response_to_survey_time);
+
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.status === 'success') {
+                    const prediction = result.prediction;
+                    const { color, bg } = styleResult(prediction);
+
+                    predictionText.textContent = prediction.toUpperCase();
+                    predictionText.className = `text-3xl font-extrabold mt-1 ${color}`;
+                    resultArea.className = `w-full md:w-1/2 p-4 text-center rounded-lg shadow-xl transition-all duration-300 transform scale-100 opacity-100 ${bg}`;
+
+                } else {
+                    const errorMsg = result.error || 'An unexpected error occurred during prediction.';
+                    errorMessage.textContent = `Prediction Error: ${errorMsg}`;
+                    errorMessage.classList.remove('hidden');
+                    resultArea.classList.add('scale-0', 'opacity-0');
+                    predictionText.textContent = '';
+                }
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                errorMessage.textContent = 'Network or server communication failed. See console for details.';
+                errorMessage.classList.remove('hidden');
+                resultArea.classList.add('scale-0', 'opacity-0');
+                predictionText.textContent = '';
+
+            } finally {
+                predictButton.disabled = false;
+                predictButton.textContent = 'Predict CSAT Score';
+            }
+        });
+    </script>
+</body>
+</html>
